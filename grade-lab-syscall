@@ -52,6 +52,21 @@ def test_trace_children():
     r.match('^\\d+: syscall fork -> -1')
     r.match('^ALL TESTS PASSED')
 
+@test(5, "trace arguments")
+def test_trace():
+    r.run_qemu(shell_script([
+        'trace 2147483647 grep hello README',
+        'trace 2 usertests fork'
+    ]))
+    matches = re.findall("^   arguments: \d+, \d+, \d+$", r.qemu.output, re.MULTILINE)
+    assert_equal(len(matches), 4, "Number of tracing of three arguments")
+    matches = re.findall("^   arguments: \d+, \d+$", r.qemu.output, re.MULTILINE)
+    assert_equal(len(matches), 2, "Number of tracing of two arguments")
+    matches = re.findall("^   arguments: \d+$", r.qemu.output, re.MULTILINE)
+    assert_equal(len(matches), 2, "Number of tracing of one arguments")
+    matches = re.findall("^   NOT arguments$", r.qemu.output, re.MULTILINE)
+    assert_equal(len(matches), 2, "Number of 'NOT arguments'")
+
 @test(14, "sysinfotest")
 def test_sysinfotest():
     r.run_qemu(shell_script([

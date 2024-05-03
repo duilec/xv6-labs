@@ -2,6 +2,7 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 #include "kernel/param.h"
+#include "kernel/riscv.h"
 
 // Memory allocator by Kernighan and Ritchie,
 // The C programming Language, 2nd ed.  Section 8.7.
@@ -82,6 +83,46 @@ malloc(uint nbytes)
       }
       freep = prevp;
       return (void*)(p + 1);
+    }
+    if(p == freep)
+      if((p = morecore(nunits)) == 0)
+        return 0;
+  }
+}
+
+void*
+malloc_align(uint oribytes)
+{
+  // [header| ] <- [header| ] <- [header| ] <- [header| ]
+  //   p            ret           right         prevp
+  Header *p, *prevp, *ret, *right;
+  uint nunits, ounits;
+  // we need a larger block because of align requirement
+  uint nbytes = oribytes + 4096;
+  ounits = (oribytes + sizeof(Header) - 1)/sizeof(Header) + 1;
+  nunits = (nbytes + sizeof(Header) - 1)/sizeof(Header) + 1;
+  if((prevp = freep) == 0){
+    base.s.ptr = freep = prevp = &base;
+    base.s.size = 0;
+  }
+  for(p = prevp->s.ptr; ; prevp = p, p = p->s.ptr){
+    if(p->s.size >= nunits){
+      uint64 paddr = (uint64) p;
+      uint64 align_addr = PGROUNDUP(paddr + sizeof(Header)) - sizeof(Header);
+      uint sz = (align_addr - paddr)/sizeof(Header), psz = p->s.size;
+      ret = (Header *)align_addr;
+      ret->s.size = ounits;
+      right = ret + ounits;
+      right->s.size = psz - ounits - sz;
+      if (sz == 0) {
+        right->s.ptr = p->s.ptr;
+      } else {
+        right->s.ptr = p;
+        p->s.size = sz;
+      }
+      prevp->s.ptr = right;
+      freep = prevp;
+      return (void*)(ret + 1);
     }
     if(p == freep)
       if((p = morecore(nunits)) == 0)

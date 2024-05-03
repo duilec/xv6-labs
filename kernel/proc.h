@@ -40,6 +40,11 @@ extern struct cpu cpus[NCPU];
 // the trapframe includes callee-saved user registers like s0-s11 because the
 // return-to-user path via usertrapret() doesn't return through
 // the entire kernel call stack.
+struct threadshared {
+  struct spinlock tlock; // protect thread shared variable
+  uint64 sz;   // Size of process memory (bytes)
+};
+
 struct trapframe {
   /*   0 */ uint64 kernel_satp;   // kernel page table
   /*   8 */ uint64 kernel_sp;     // top of process's kernel stack
@@ -77,6 +82,7 @@ struct trapframe {
   /* 264 */ uint64 t4;
   /* 272 */ uint64 t5;
   /* 280 */ uint64 t6;
+	/* 288 */ struct threadshared tshared;
 };
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
@@ -104,4 +110,8 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct threadshared *tshared;// variables shared between thread
+  uint64 trap_va;							 // trapframe va for thraeds
+	int isthread;                // is thread?
+	uint64 tstack;               // stack of thraed
 };

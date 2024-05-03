@@ -325,6 +325,79 @@ fork(void)
   return pid;
 }
 
+int
+clone(void(*fcn)(void*, void*), void *arg1, void *arg2, void *stack)
+{
+  int i, pid;
+  struct proc *np;
+  struct proc *p = myproc();
+
+  // Ensure stack is page align, which help setup guard page.
+  if(((uint64)stack % PGSIZE) != 0)
+    return -1;
+
+  // Allocate process.
+  if((np = allocproc()) == 0){
+    return -1;
+  }
+
+  // mark this process is thread
+  np->isthread = 1;
+  // use same page table as parent, to keep same memory space
+  np->pagetable = p->pagetable;
+  // share some variable between threads
+  np->tshared = p->tshared;
+  np->parent = p;
+  // copy saved user registers.
+  *(np->trapframe) = *(p->trapframe);
+
+  // setup thread's function address
+  np->trapframe->epc = (uint64)fcn;
+  // setup thread's function args
+  // refer to riscv calling covention: https://pdos.csail.mit.edu/6.828/2023/readings/riscv-calling.pdf
+  np->trapframe->a0 = (uint64)arg1;
+  np->trapframe->a1 = (uint64)arg2;
+  // ensure thread without exit return to a invalid address to trigger trap
+  np->trapframe->ra = 0xffffffffffffffff;
+
+  // Use the second page as the user stack.
+  np->trapframe->sp = (uint64)(stack + 2 * PGSIZE);
+  // Keep stack address for "join" to return
+  np->tstack = (uint64)stack;
+  // setup first stack page as guard page, remove PTE_U
+  uvmclear(np->pagetable, np->tstack);
+
+  // find a address to remap TRAPFRAME page
+  // it is important since TRAPFRAME page should not be shared across threads
+  uint64 trap_va = PHYSTOP;
+  for(; trap_va < TRAPFRAME ; trap_va += PGSIZE) {
+    if (kwalkaddr(np->pagetable, trap_va) == 0) {
+      np->trap_va = trap_va;
+      mappages(np->pagetable, np->trap_va, PGSIZE,
+           (uint64)(np->trapframe), PTE_R | PTE_W);
+      break;
+    }
+  }
+  // failed to find a space
+  if (trap_va >= TRAPFRAME) {
+    release(&np->lock);
+    return -1;
+  }
+
+  // increment reference counts on open file descriptors.
+  for(i = 0; i < NOFILE; i++)
+    if(p->ofile[i])
+      np->ofile[i] = filedup(p->ofile[i]);
+  np->cwd = idup(p->cwd);
+
+  safestrcpy(np->name, p->name, sizeof(p->name));
+  pid = np->pid;
+  np->state = RUNNABLE;
+  release(&np->lock);
+
+  return pid;
+}
+
 // Pass p's abandoned children to init.
 // Caller must hold wait_lock.
 void
@@ -431,6 +504,48 @@ wait(uint64 addr)
     
     // Wait for a child to exit.
     sleep(p, &wait_lock);  //DOC: wait-sleep
+  }
+}
+
+int
+join(void **stack)
+{
+  struct proc *pp;
+  int havekids, pid;
+  struct proc *p = myproc();
+
+  acquire(&wait_lock);
+  for(;;){
+    // Scan through table looking for exited children.
+    havekids = 0;
+    for(pp = proc; pp < &proc[NPROC]; pp++){
+      if(pp->parent == p && pp->isthread){
+        acquire(&pp->lock);
+        havekids = 1;
+        if(pp->state == ZOMBIE){
+          pid = pp->pid;
+          if(stack != 0 && copyout(p->pagetable, (uint64)stack, (char *)&pp->tstack,
+                                  sizeof(pp->tstack)) < 0) {
+            release(&pp->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          // reset guard page with PTE_U
+          uvmset(pp->pagetable, pp->tstack);
+          freeproc(pp);
+          release(&pp->lock);
+          release(&wait_lock);
+          return pid;
+        }
+        release(&pp->lock);
+      }
+    }
+    if(!havekids || p->killed){
+      release(&wait_lock);
+      return -1;
+    }
+
+    sleep(p, &wait_lock);
   }
 }
 

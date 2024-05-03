@@ -2,6 +2,7 @@
 #include "kernel/stat.h"
 #include "kernel/fcntl.h"
 #include "user/user.h"
+#include "kernel/riscv.h"
 
 //
 // wrapper so that it's OK if main() does not call exit().
@@ -144,4 +145,48 @@ void *
 memcpy(void *dst, const void *src, uint n)
 {
   return memmove(dst, src, n);
+}
+
+static inline int fetch_and_add(int* variable, int value) {
+  int result;
+  asm volatile (
+      "amoadd.w %0, %2, (%1)"  
+      : "=r" (result)    
+      : "r" (variable), "r" (value) 
+      : "memory"          
+  );
+  return result;
+}
+
+void lock_init(lock_t *lock) {
+  lock->ticket = 0;
+  lock->turn = 0;
+}
+
+void lock_acquire(lock_t *lock) {
+  int myturn = fetch_and_add(&lock->ticket, 1);
+  while( fetch_and_add(&lock->turn, 0) != myturn ) {
+    ; 
+  }
+}
+
+void lock_release(lock_t *lock) {
+  lock->turn = lock->turn + 1;
+}
+
+lock_t new_thread_create_lock; 
+
+int new_thread_create(void (*start_routine)(void *, void *), void *arg1, void *arg2)
+{
+  lock_acquire(&new_thread_create_lock);
+  void *stack = malloc_align(8192);
+  lock_release(&new_thread_create_lock);
+  return clone(start_routine, arg1, arg2, stack);
+}
+
+int thread_join(){
+  void *stack;
+  int pid = join(&stack);
+  free(stack);
+  return pid;
 }

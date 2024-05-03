@@ -22,6 +22,8 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int clone(void(*)(void*, void*), void *, void *, void *);
+int join(void **);
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -36,6 +38,12 @@ uint strlen(const char*);
 void* memset(void*, int, uint);
 void* malloc(uint);
 void free(void*);
+void* malloc_align(uint);
 int atoi(const char*);
 int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
+void lock_init(lock_t *);
+void lock_acquire(lock_t *);
+void lock_release(lock_t *);
+int new_thread_create(void (*)(void *, void *), void *, void *);
+int thread_join();

@@ -5,6 +5,20 @@ from gradelib import *
 
 r = Runner(save("xv6.out"))
 
+@test(5, "uptime")
+def test_uptime():
+    r.run_qemu(shell_script([
+        'uptime'
+    ]))
+    r.match('^\d+ ticks in xv6$')
+
+@test(5, "find, some regular expressions")
+def test_find():
+    r.run_qemu(shell_script([
+        'find . .m', 'find . *tests'
+    ]))
+    r.match('^\.\/rm$', '^\.\/usertests$')
+
 @test(5, "sleep, no arguments")
 def test_sleep_no_args():
     r.run_qemu(shell_script([
@@ -74,13 +88,38 @@ def test_find_recursive():
 def test_xargs():
     r.run_qemu(shell_script([
         'sh < xargstest.sh',
-        'echo DONE',
-    ], 'DONE'))
+    ]))
+    matches = re.findall("hello", r.qemu.output)
+    # if len(matches) == 0 i.e. you have not complete test_sh, so test xargs
+    if len(matches) == 0:
+        r.run_qemu(shell_script([
+            'sh < xargstest.sh',
+            'echo DONE'
+        ], 'DONE'))
+        matches = re.findall("hello", r.qemu.output)
+        assert_equal(len(matches), 3, "Number of appearances of 'hello'")
+        matches = re.findall("\$", r.qemu.output)
+        assert_equal(len(matches), 9, "Number of appearances of '$'")
+    # else you already complete test_sh, so test sh again
+    else:
+        matches = re.findall("hello", r.qemu.output)
+        assert_equal(len(matches), 3, "Number of appearances of 'hello'")
+        matches = re.findall("\$", r.qemu.output)
+        assert_equal(len(matches), 2, "Number of appearances of '$'")
+
+@test(5, "sh, not '$' from a file")
+def test_sh():
+    r.run_qemu(shell_script([
+        'sh < xargstest.sh',
+    ]))
     matches = re.findall("hello", r.qemu.output)
     assert_equal(len(matches), 3, "Number of appearances of 'hello'")
+    matches = re.findall("\$", r.qemu.output)
+    assert_equal(len(matches), 2, "Number of appearances of '$'")
 
 @test(1, "time")
 def test_time():
     check_time()
     
 run_tests()
+
